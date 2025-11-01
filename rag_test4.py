@@ -63,17 +63,19 @@ def get_vectorstore(text_chunks):
     return vectordb
 
 def extract_text_from_chunk(chunk):
-    """RemoteRunnable의 청크를 안전하게 문자열로 변환"""
+    """RemoteRunnable의 청크를 안전하게 문자열로 변환 (메타데이터 제외)"""
     if isinstance(chunk, str):
         return chunk
     elif isinstance(chunk, dict):
-        # 딕셔너리인 경우 content 또는 text 키를 찾음
-        return chunk.get('content', '') or chunk.get('text', '') or str(chunk)
+        # 딕셔너리인 경우 content 또는 text 키만 추출
+        content = chunk.get('content', '') or chunk.get('text', '')
+        return content if content else ''
     elif hasattr(chunk, 'content'):
-        # AIMessage 객체인 경우
-        return chunk.content
+        # AIMessage/AIMessageChunk 객체인 경우 content만 추출
+        return chunk.content if chunk.content else ''
     else:
-        return str(chunk)
+        # 알 수 없는 타입은 빈 문자열 반환 (메타데이터 출력 방지)
+        return ''
 
 def main():
     
@@ -165,8 +167,10 @@ def main():
                 for chunk in answer:
                    # 청크를 안전하게 문자열로 변환
                    chunk_text = extract_text_from_chunk(chunk)
-                   chunks.append(chunk_text)
-                   chat_container.markdown("".join(chunks))
+                   # 빈 문자열이 아닐 때만 추가 (메타데이터 청크 무시)
+                   if chunk_text:
+                       chunks.append(chunk_text)
+                       chat_container.markdown("".join(chunks))
                 add_history("ai", "".join(chunks))
                 
             else:
@@ -182,8 +186,10 @@ def main():
                 for chunk in answer:
                    # 청크를 안전하게 문자열로 변환
                    chunk_text = extract_text_from_chunk(chunk)
-                   chunks.append(chunk_text)
-                   chat_container.markdown("".join(chunks))
+                   # 빈 문자열이 아닐 때만 추가 (메타데이터 청크 무시)
+                   if chunk_text:
+                       chunks.append(chunk_text)
+                       chat_container.markdown("".join(chunks))
                 add_history("ai", "".join(chunks))
           
 if __name__ == '__main__':
