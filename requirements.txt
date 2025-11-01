@@ -10,3 +10,4 @@ langchainhub==0.1.17
 transformers==4.40.2
 sentence-transformers==2.7.0
 torch>=2.0.0
+httpx==0.25.2
