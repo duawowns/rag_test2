@@ -10,7 +10,6 @@ from langchain.document_loaders import UnstructuredPowerPointLoader
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings import HuggingFaceEmbeddings
-from langchain_core.output_parsers import StrOutputParser
 
 from langchain.vectorstores import FAISS
 from langchain_core.prompts import ChatPromptTemplate
@@ -62,6 +61,19 @@ def get_vectorstore(text_chunks):
     vectordb = FAISS.from_documents(text_chunks, embeddings)
 
     return vectordb
+
+def extract_text_from_chunk(chunk):
+    """RemoteRunnable의 청크를 안전하게 문자열로 변환"""
+    if isinstance(chunk, str):
+        return chunk
+    elif isinstance(chunk, dict):
+        # 딕셔너리인 경우 content 또는 text 키를 찾음
+        return chunk.get('content', '') or chunk.get('text', '') or str(chunk)
+    elif hasattr(chunk, 'content'):
+        # AIMessage 객체인 경우
+        return chunk.content
+    else:
+        return str(chunk)
 
 def main():
     
@@ -151,7 +163,9 @@ def main():
                 answer = rag_chain.stream(user_input)  
                 chunks = []
                 for chunk in answer:
-                   chunks.append(chunk)
+                   # 청크를 안전하게 문자열로 변환
+                   chunk_text = extract_text_from_chunk(chunk)
+                   chunks.append(chunk_text)
                    chat_container.markdown("".join(chunks))
                 add_history("ai", "".join(chunks))
                 
@@ -161,16 +175,16 @@ def main():
                 )
 
                 # 체인을 생성합니다.
-                chain = prompt2 | llm | StrOutputParser()
+                chain = prompt2 | llm
 
                 answer = chain.stream(user_input)  # 문서에 대한 질의
                 chunks = []
                 for chunk in answer:
-                   chunks.append(chunk)
+                   # 청크를 안전하게 문자열로 변환
+                   chunk_text = extract_text_from_chunk(chunk)
+                   chunks.append(chunk_text)
                    chat_container.markdown("".join(chunks))
                 add_history("ai", "".join(chunks))
           
 if __name__ == '__main__':
     main()
-    
-    
