@@ -146,7 +146,6 @@ def main():
                    }
                    | prompt1
                    | llm
-                   | StrOutputParser()
                 )
               
                 answer = rag_chain.stream(user_input)  
