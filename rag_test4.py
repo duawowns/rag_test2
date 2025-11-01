@@ -140,8 +140,8 @@ def main():
                 answer = rag_chain.stream(user_input)  
                 chunks = []
                 for chunk in answer:
-                   text = chunk.content if hasattr(chunk, 'content') else str(chunk)
-                   chunks.append(text)
+                   # content만 추출 (간단하게)
+                   chunks.append(chunk.content)
                    chat_container.markdown("".join(chunks))
                 add_history("ai", "".join(chunks))
                 
@@ -155,8 +155,8 @@ def main():
                 answer = chain.stream(user_input)
                 chunks = []
                 for chunk in answer:
-                   text = chunk.content if hasattr(chunk, 'content') else str(chunk)
-                   chunks.append(text)
+                   # content만 추출 (간단하게)
+                   chunks.append(chunk.content)
                    chat_container.markdown("".join(chunks))
                 add_history("ai", "".join(chunks))
           
