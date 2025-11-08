@@ -83,9 +83,9 @@ def main():
 
     st.set_page_config(
     page_title="Future Systems 회사소개 챗봇",
-    page_icon="🏢")
+    page_icon="")
 
-    st.title("_Future Systems :blue[회사소개 챗봇]_ 🏢")
+    st.title("_Future Systems :blue[회사소개 챗봇]_")
 
     if "messages" not in st.session_state:
        st.session_state["messages"] = []
@@ -109,7 +109,7 @@ def main():
         st.session_state.retriever = None
 
     with st.sidebar:
-        st.header("📄 회사 소개 자료 업로드")
+        st.header("회사 소개 자료 업로드")
         uploaded_files =  st.file_uploader("PDF, DOCX, PPTX 파일을 업로드하세요",
                                           type=['pdf','docx','pptx'],
                                           accept_multiple_files=True)
@@ -117,7 +117,7 @@ def main():
 
         st.divider()
         st.info("""
-        💡 **사용 방법**
+        **사용 방법**
         1. 회사 소개 자료를 업로드하세요
         2. '문서 처리하기' 버튼을 클릭하세요
         3. 회사에 대해 궁금한 것을 물어보세요!
