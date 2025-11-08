@@ -82,10 +82,10 @@ def main():
     global retriever
 
     st.set_page_config(
-    page_title="Future Systems 회사소개 챗봇",
+    page_title="챗봇",
     page_icon="")
 
-    st.title("_Future Systems :blue[회사소개 챗봇]_")
+    st.title(":blue[챗봇]")
 
     if "messages" not in st.session_state:
        st.session_state["messages"] = []
@@ -109,19 +109,11 @@ def main():
         st.session_state.retriever = None
 
     with st.sidebar:
-        st.header("회사 소개 자료 업로드")
+        st.header("자료 업로드")
         uploaded_files =  st.file_uploader("PDF, DOCX, PPTX 파일을 업로드하세요",
                                           type=['pdf','docx','pptx'],
                                           accept_multiple_files=True)
         process = st.button("문서 처리하기")
-
-        st.divider()
-        st.info("""
-        **사용 방법**
-        1. 회사 소개 자료를 업로드하세요
-        2. '문서 처리하기' 버튼을 클릭하세요
-        3. 회사에 대해 궁금한 것을 물어보세요!
-        """)
 
     if process:
 
@@ -151,7 +143,7 @@ def main():
 
     print_history()
 
-    if user_input := st.chat_input("회사에 대해 궁금한 점을 물어보세요..."):
+    if user_input := st.chat_input("궁금한 점을 물어보세요..."):
         #사용자가 입력한 내용
         add_history("user", user_input)
         st.chat_message("user").write(f"{user_input}")
