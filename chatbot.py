@@ -11,8 +11,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 from langchain_community.vectorstores import FAISS
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_community.chat_message_histories import StreamlitChatMessageHistory
 from langserve import RemoteRunnable
 
 # 설정
@@ -157,117 +159,89 @@ def main():
 
     st.title(":blue[챗봇]")
 
-    # 메시지 초기화
-    if "messages" not in st.session_state:
-        st.session_state["messages"] = []
+    # StreamlitChatMessageHistory 초기화 (공식 LangChain 방식)
+    msgs = StreamlitChatMessageHistory(key="chat_messages")
 
     # RAG 시스템 초기화 (자동, 캐싱)
     retriever = initialize_rag_system()
 
-    if "messages" not in st.session_state:
-        st.session_state["messages"] = []
-
     # 대화 기록 출력
-    for msg in st.session_state.messages:
-        st.chat_message(msg.role).write(msg.content)
+    for msg in msgs.messages:
+        st.chat_message(msg.type).write(msg.content)
 
-    RAG_PROMPT_TEMPLATE = """다음 제공된 정보만을 사용하여 질문에 답변하세요.
+    # RAG 프롬프트 템플릿 (MessagesPlaceholder 사용)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", """다음 제공된 정보만을 사용하여 질문에 답변하세요.
 제공된 정보에 없는 내용은 절대 답변하지 마세요.
 전화번호, 주소, 이메일 등은 제공된 정보에서 정확히 찾아서 그대로 제공하세요.
 
-이전 대화 내용:
-{chat_history}
-
 제공된 정보:
-{context}
-
-질문: {question}
-
-답변:"""
+{context}"""),
+        MessagesPlaceholder(variable_name="history"),
+        ("human", "{question}"),
+    ])
 
     # 사용자 입력
     if user_input := st.chat_input("질문을 입력하세요"):
-        # 사용자 메시지 추가
-        st.session_state.messages.append(ChatMessage(role="user", content=user_input))
-        st.chat_message("user").write(user_input)
+        # 사용자 메시지 표시
+        st.chat_message("human").write(user_input)
 
-        # AI 응답
-        with st.chat_message("assistant"):
-            chat_container = st.empty()
+        if retriever:
+            try:
+                # 검색 결과 확인 (디버깅)
+                retrieved_docs = retriever.get_relevant_documents(user_input)
+                logger.info(f"검색 질문: {user_input}")
+                logger.info(f"검색된 문서 수: {len(retrieved_docs)}")
+                for i, doc in enumerate(retrieved_docs[:3]):
+                    logger.info(f"문서 {i+1}: {doc.page_content[:100]}...")
 
-            if retriever:
-                try:
-                    # 대화 히스토리 포맷팅 (최근 5개만 사용)
-                    def format_chat_history(messages):
-                        if not messages:
-                            return "이전 대화 없음"
+                # LLM 연결
+                llm = RemoteRunnable(DEFAULT_LLM_URL)
 
-                        history_text = []
-                        # 최근 5개 대화만 사용 (현재 질문 제외)
-                        recent_messages = messages[-6:-1] if len(messages) > 1 else []
+                # 문서 포맷팅
+                def format_docs(docs):
+                    return "\n\n".join(doc.page_content for doc in docs)
 
-                        for msg in recent_messages:
-                            role = "사용자" if msg.role == "user" else "챗봇"
-                            history_text.append(f"{role}: {msg.content}")
+                # RAG 체인 (히스토리 없이)
+                rag_chain = (
+                    {
+                        "context": retriever | format_docs,
+                        "question": RunnablePassthrough(),
+                    }
+                    | prompt
+                    | llm
+                )
 
-                        return "\n".join(history_text) if history_text else "이전 대화 없음"
+                # RunnableWithMessageHistory로 래핑 (공식 LangChain 방식)
+                chain_with_history = RunnableWithMessageHistory(
+                    rag_chain,
+                    lambda session_id: msgs,
+                    input_messages_key="question",
+                    history_messages_key="history",
+                )
 
-                    chat_history = format_chat_history(st.session_state.messages)
+                # 설정 (세션 ID)
+                config = {"configurable": {"session_id": "user_session"}}
 
-                    # 검색 결과 확인 (디버깅)
-                    retrieved_docs = retriever.get_relevant_documents(user_input)
-                    logger.info(f"검색 질문: {user_input}")
-                    logger.info(f"검색된 문서 수: {len(retrieved_docs)}")
-                    for i, doc in enumerate(retrieved_docs[:3]):
-                        logger.info(f"문서 {i+1}: {doc.page_content[:100]}...")
-
-                    # LLM 연결
-                    llm = RemoteRunnable(DEFAULT_LLM_URL)
-
-                    # 프롬프트 생성
-                    prompt = ChatPromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
-
-                    # 문서 포맷팅
-                    def format_docs(docs):
-                        return "\n\n".join(doc.page_content for doc in docs)
-
-                    # RAG 체인
-                    rag_chain = (
-                        {
-                            "context": retriever | format_docs,
-                            "question": RunnablePassthrough(),
-                            "chat_history": lambda _: chat_history,
-                        }
-                        | prompt
-                        | llm
-                    )
-
-                    # 스트리밍 응답
-                    answer = rag_chain.stream(user_input)
+                # 응답 생성 (스트리밍)
+                with st.chat_message("ai"):
+                    chat_container = st.empty()
                     chunks = []
-                    for chunk in answer:
+
+                    for chunk in chain_with_history.stream({"question": user_input}, config):
                         chunk_text = extract_text_from_chunk(chunk)
                         if chunk_text:
                             chunks.append(chunk_text)
                             chat_container.markdown("".join(chunks))
 
-                    # 대화 기록에 추가
-                    st.session_state.messages.append(
-                        ChatMessage(role="assistant", content="".join(chunks))
-                    )
-
-                except Exception as e:
-                    error_msg = f"오류가 발생했습니다: {str(e)}"
-                    chat_container.error(error_msg)
-                    st.session_state.messages.append(
-                        ChatMessage(role="assistant", content=error_msg)
-                    )
-            else:
-                error_msg = "RAG 시스템이 초기화되지 않았습니다."
-                chat_container.error(error_msg)
-                st.session_state.messages.append(
-                    ChatMessage(role="assistant", content=error_msg)
-                )
+            except Exception as e:
+                error_msg = f"오류가 발생했습니다: {str(e)}"
+                logger.error(error_msg)
+                logger.error(f"에러 상세: {e}")
+                st.chat_message("ai").error(error_msg)
+        else:
+            error_msg = "RAG 시스템이 초기화되지 않았습니다."
+            st.chat_message("ai").error(error_msg)
 
 if __name__ == '__main__':
     main()
