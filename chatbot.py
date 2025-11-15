@@ -197,9 +197,28 @@ def main():
 
         if retriever:
             try:
-                # 검색 결과 확인 (디버깅)
-                retrieved_docs = retriever.invoke(user_input)
-                logger.info(f"검색 질문: {user_input}")
+                # 검색 쿼리 향상 (히스토리 컨텍스트 포함)
+                search_query = user_input
+
+                # 짧은 질문인 경우 히스토리에서 컨텍스트 추가
+                if len(user_input.split()) <= 3 and msgs.messages:
+                    # 최근 2개의 사용자 메시지에서 컨텍스트 추출
+                    recent_context = []
+                    for msg in reversed(msgs.messages[-4:]):  # 최근 4개 메시지 확인
+                        if msg.type == "human":
+                            recent_context.append(msg.content)
+                            if len(recent_context) >= 2:
+                                break
+
+                    if recent_context:
+                        # 최근 컨텍스트와 현재 질문 결합
+                        search_query = " ".join(reversed(recent_context)) + " " + user_input
+                        logger.info(f"향상된 검색 쿼리: {search_query}")
+
+                # 검색 실행
+                retrieved_docs = retriever.invoke(search_query)
+                logger.info(f"원본 질문: {user_input}")
+                logger.info(f"검색 쿼리: {search_query}")
                 logger.info(f"검색된 문서 수: {len(retrieved_docs)}")
                 for i, doc in enumerate(retrieved_docs[:3]):
                     logger.info(f"문서 {i+1}: {doc.page_content[:100]}...")
@@ -216,6 +235,9 @@ def main():
 검색된 회사 정보가 질문과 관련이 있다면 그 정보를 우선적으로 사용하여 정확하게 답변하세요.
 검색된 정보가 질문과 관련이 없거나 충분하지 않다면 일반 지식을 사용하여 친절하게 답변하세요.
 특히 회사 직원의 전화번호, 이메일, 주소 등은 검색된 정보를 정확히 제공하세요.
+
+중요: 이전 대화의 맥락을 고려하여 답변하세요. 예를 들어, 이전에 특정 인물에 대해 물어봤다면
+이어지는 "전화번호는?" 같은 질문은 그 인물에 대한 것입니다.
 
 검색된 회사 정보:
 {context}
