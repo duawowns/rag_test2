@@ -202,6 +202,17 @@ def main():
     with st.sidebar:
         st.header("자료 업로드")
 
+        # LLM URL 설정
+        llm_url = st.text_input(
+            "LLM 서버 URL",
+            value="https://dioramic-corrin-undetractively.ngrok-free.dev/llm/",
+            help="ngrok URL이 변경되면 여기에 새 URL을 입력하세요"
+        )
+        if 'llm_url' not in st.session_state:
+            st.session_state['llm_url'] = llm_url
+        else:
+            st.session_state['llm_url'] = llm_url
+
         # CSV 자동 로드 옵션
         load_csv = st.checkbox("회사 직원 데이터 자동 로드", value=True)
 
@@ -275,11 +286,11 @@ def main():
                 # LLM 선택 (PEFT 또는 RemoteRunnable)
                 if st.session_state.get('use_peft', False):
                     from langserve import RemoteRunnable
-                    llm = RemoteRunnable("https://dioramic-corrin-undetractively.ngrok-free.dev/llm/")
+                    llm = RemoteRunnable(st.session_state.get('llm_url'))
                     # llm = load_peft_model()  # PEFT 모델 (GPU 필요)
                 else:
                     from langserve import RemoteRunnable
-                    llm = RemoteRunnable("https://dioramic-corrin-undetractively.ngrok-free.dev/llm/")
+                    llm = RemoteRunnable(st.session_state.get('llm_url'))
 
                 prompt1 = ChatPromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
 
