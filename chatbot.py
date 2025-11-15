@@ -2,6 +2,7 @@ import streamlit as st
 import tiktoken
 from loguru import logger
 import pandas as pd
+import re
 
 from langchain_core.messages import ChatMessage
 from langchain_core.documents import Document
@@ -236,25 +237,24 @@ def main():
 검색된 정보가 질문과 관련이 없거나 충분하지 않다면 일반 지식을 사용하여 친절하게 답변하세요.
 특히 회사 직원의 전화번호, 이메일, 주소 등은 검색된 정보를 정확히 제공하세요.
 
-중요: 이전 대화의 맥락을 고려하여 답변하세요. 예를 들어, 이전에 특정 인물에 대해 물어봤다면
-이어지는 "전화번호는?" 같은 질문은 그 인물에 대한 것입니다.
-
 검색된 회사 정보:
 {context}
 ---
 
 """
 
-                # 히스토리 추가
+                # 최근 히스토리만 추가 (최근 6개 메시지, 3턴)
                 if msgs.messages:
-                    for msg in msgs.messages:
-                        if msg.type == "human":
-                            full_prompt += f"Q: {msg.content}\n"
-                        else:
-                            full_prompt += f"A: {msg.content}\n"
+                    recent_messages = msgs.messages[-6:]  # 최근 3턴 (6개 메시지)
+                    if recent_messages:
+                        full_prompt += "최근 대화:\n"
+                        for msg in recent_messages:
+                            role = "사용자" if msg.type == "human" else "어시스턴트"
+                            full_prompt += f"{role}: {msg.content}\n"
+                        full_prompt += "\n"
 
-                # 현재 질문
-                full_prompt += f"Q: {user_input}\nA:"
+                # 현재 질문 (명확하게 구분)
+                full_prompt += f"현재 질문: {user_input}\n\n답변 (간결하고 정확하게, 프롬프트 형식 없이 내용만):"
 
                 logger.info(f"Full prompt length: {len(full_prompt)}")
 
@@ -279,14 +279,21 @@ def main():
 
                     # 프롬프트 패턴 제거 (후처리)
                     final_response = final_response.strip()
-                    patterns_to_remove = ["사용자:", "어시스턴트:", "Q:", "A:"]
-                    for pattern in patterns_to_remove:
-                        # 앞쪽 제거
-                        if final_response.startswith(pattern):
-                            final_response = final_response[len(pattern):].strip()
-                        # 뒤쪽 제거
-                        if final_response.endswith(pattern):
-                            final_response = final_response[:-len(pattern)].strip()
+
+                    # 모든 프롬프트 패턴 제거 (앞, 뒤, 중간)
+                    # "Q: ..." 나 "A: ..." 패턴 제거
+                    final_response = re.sub(r'^[QA]:\s*', '', final_response)
+                    final_response = re.sub(r'\n[QA]:\s*', '\n', final_response)
+
+                    # "사용자:" "어시스턴트:" 패턴 제거
+                    final_response = re.sub(r'^(사용자|어시스턴트):\s*', '', final_response)
+                    final_response = re.sub(r'\n(사용자|어시스턴트):\s*', '\n', final_response)
+
+                    # "현재 질문:" 같은 메타 텍스트 제거
+                    final_response = re.sub(r'현재 질문:.*?\n', '', final_response)
+                    final_response = re.sub(r'답변.*?:', '', final_response, count=1)
+
+                    final_response = final_response.strip()
 
                     # 정리된 응답 표시
                     if final_response:
