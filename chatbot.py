@@ -210,9 +210,8 @@ def main():
                 # LLM 연결
                 llm = RemoteRunnable(DEFAULT_LLM_URL)
 
-                # 프롬프트에 컨텍스트와 히스토리 주입
-                messages = [
-                    ("system", f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
+                # 프롬프트 구성 - 시스템 메시지 + 히스토리 + 현재 질문
+                system_message = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
 
 아래 검색된 회사 정보가 질문과 관련이 있다면, 그 정보를 우선적으로 사용하여 정확하게 답변하세요.
 검색된 정보가 질문과 관련이 없거나 충분하지 않다면, 당신의 일반 지식을 사용하여 친절하게 답변하세요.
@@ -220,34 +219,38 @@ def main():
 특히 회사 직원의 전화번호, 이메일, 주소 등은 검색된 정보를 정확히 그대로 제공하세요.
 
 검색된 회사 정보:
-{context}""")
-                ]
+{context}"""
+
+                # 전체 프롬프트 구성
+                full_prompt = system_message + "\n\n"
 
                 # 히스토리 추가
-                messages.extend([(msg.type, msg.content) for msg in msgs.messages])
+                if msgs.messages:
+                    full_prompt += "이전 대화:\n"
+                    for msg in msgs.messages:
+                        role = "사용자" if msg.type == "human" else "어시스턴트"
+                        full_prompt += f"{role}: {msg.content}\n"
+                    full_prompt += "\n"
 
-                # 현재 질문 추가
-                messages.append(("human", user_input))
+                # 현재 질문
+                full_prompt += f"사용자: {user_input}\n어시스턴트:"
 
-                # 프롬프트 생성
-                chat_prompt = ChatPromptTemplate.from_messages(messages)
-
-                # 체인 실행
-                chain = chat_prompt | llm
+                logger.info(f"Full prompt length: {len(full_prompt)}")
 
                 # 응답 생성 (스트리밍)
                 with st.chat_message("ai"):
                     chat_container = st.empty()
                     chunks = []
 
-                    for chunk in chain.stream({}):
-                        logger.info(f"Chunk type: {type(chunk)}, content: {chunk}")
+                    # RemoteRunnable에 직접 텍스트 전달
+                    for chunk in llm.stream(full_prompt):
+                        logger.info(f"Chunk type: {type(chunk)}, content repr: {repr(chunk)}")
                         chunk_text = extract_text_from_chunk(chunk)
                         if chunk_text:
                             chunks.append(chunk_text)
                             chat_container.markdown("".join(chunks))
                         else:
-                            logger.warning(f"Empty chunk_text from chunk: {chunk}")
+                            logger.warning(f"Empty chunk_text from chunk: {repr(chunk)}")
 
                     # 응답을 히스토리에 추가
                     final_response = "".join(chunks)
