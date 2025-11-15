@@ -4,7 +4,7 @@ from loguru import logger
 import pandas as pd
 
 from langchain_core.messages import ChatMessage
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -113,46 +113,41 @@ def extract_text_from_chunk(chunk):
 @st.cache_resource
 def initialize_rag_system():
     """RAG 시스템 초기화 (자동)"""
-    with st.spinner("데이터 로딩 중..."):
-        all_docs = []
+    all_docs = []
 
-        # 직원 CSV 로드
-        try:
-            employee_docs = load_employee_csv(CSV_EMPLOYEE_PATH)
-            all_docs.extend(employee_docs)
-            st.success(f"✅ 직원 데이터 로드: {len(employee_docs)}명")
-        except Exception as e:
-            st.warning(f"직원 CSV 로드 실패: {e}")
+    # 직원 CSV 로드
+    try:
+        employee_docs = load_employee_csv(CSV_EMPLOYEE_PATH)
+        all_docs.extend(employee_docs)
+    except Exception as e:
+        logger.error(f"직원 CSV 로드 실패: {e}")
 
-        # 회사 소개 CSV 로드 (200개)
-        try:
-            company_info_docs = load_company_info_csv(CSV_COMPANY_INFO_PATH)
-            all_docs.extend(company_info_docs)
-            st.success(f"✅ 회사 소개 데이터 로드: {len(company_info_docs)}개 항목")
-        except Exception as e:
-            st.warning(f"회사 소개 CSV 로드 실패: {e}")
+    # 회사 소개 CSV 로드 (200개)
+    try:
+        company_info_docs = load_company_info_csv(CSV_COMPANY_INFO_PATH)
+        all_docs.extend(company_info_docs)
+    except Exception as e:
+        logger.error(f"회사 소개 CSV 로드 실패: {e}")
 
-        # PDF 로드
-        try:
-            pdf_docs = load_pdf_data(PDF_DATA_PATH)
-            pdf_chunks = get_text_chunks(pdf_docs)
-            all_docs.extend(pdf_chunks)
-            st.success(f"✅ PDF 회사 소개 자료 로드: {len(pdf_chunks)}개 청크")
-        except Exception as e:
-            st.warning(f"PDF 로드 실패: {e}")
+    # PDF 로드
+    try:
+        pdf_docs = load_pdf_data(PDF_DATA_PATH)
+        pdf_chunks = get_text_chunks(pdf_docs)
+        all_docs.extend(pdf_chunks)
+    except Exception as e:
+        logger.error(f"PDF 로드 실패: {e}")
 
-        # 벡터스토어 생성
-        if all_docs:
-            vectorstore = get_vectorstore(all_docs)
-            retriever = vectorstore.as_retriever(
-                search_type='mmr',
-                search_kwargs={'k': 5, 'fetch_k': 10}
-            )
-            st.success(f"✅ RAG 시스템 준비 완료: 총 {len(all_docs)}개 문서")
-            return retriever
-        else:
-            st.error("로드된 문서가 없습니다.")
-            return None
+    # 벡터스토어 생성
+    if all_docs:
+        vectorstore = get_vectorstore(all_docs)
+        retriever = vectorstore.as_retriever(
+            search_type='mmr',
+            search_kwargs={'k': 5, 'fetch_k': 10}
+        )
+        return retriever
+    else:
+        logger.error("로드된 문서가 없습니다.")
+        return None
 
 def main():
     st.set_page_config(
@@ -161,31 +156,10 @@ def main():
     )
 
     st.title(":blue[챗봇]")
-    st.caption("🚀 RAG 하이브리드 챗봇 - 자동 로드")
 
     # 메시지 초기화
     if "messages" not in st.session_state:
         st.session_state["messages"] = []
-
-    # 사이드바
-    with st.sidebar:
-        st.header("설정")
-
-        llm_url = st.text_input(
-            "LLM 서버 URL",
-            value=DEFAULT_LLM_URL,
-            help="ngrok URL이 변경되면 여기에 입력하세요"
-        )
-
-        st.divider()
-        st.info("""
-        **자동 로드됨:**
-        - 직원 데이터 2명 (CSV)
-        - 회사 소개 200개 항목 (CSV)
-        - 회사 소개 자료 (PDF)
-
-        바로 질문하세요!
-        """)
 
     # RAG 시스템 초기화 (자동, 캐싱)
     retriever = initialize_rag_system()
@@ -220,7 +194,7 @@ Answer:"""
             if retriever:
                 try:
                     # LLM 연결
-                    llm = RemoteRunnable(llm_url)
+                    llm = RemoteRunnable(DEFAULT_LLM_URL)
 
                     # 프롬프트 생성
                     prompt = ChatPromptTemplate.from_template(RAG_PROMPT_TEMPLATE)
