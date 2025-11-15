@@ -142,7 +142,7 @@ def initialize_rag_system():
         vectorstore = get_vectorstore(all_docs)
         retriever = vectorstore.as_retriever(
             search_type='mmr',
-            search_kwargs={'k': 5, 'fetch_k': 10}
+            search_kwargs={'k': 10, 'fetch_k': 20}
         )
         return retriever
     else:
@@ -171,11 +171,18 @@ def main():
     for msg in st.session_state.messages:
         st.chat_message(msg.role).write(msg.content)
 
-    RAG_PROMPT_TEMPLATE = """아래 정보를 바탕으로 질문에 답변하세요.
-전화번호, 이메일 등의 정보는 정확히 제공하세요.
+    RAG_PROMPT_TEMPLATE = """다음 제공된 정보만을 사용하여 질문에 답변하세요.
+제공된 정보에 없는 내용은 절대 답변하지 마세요.
+전화번호, 주소, 이메일 등은 제공된 정보에서 정확히 찾아서 그대로 제공하세요.
+
+이전 대화 내용:
+{chat_history}
+
+제공된 정보:
+{context}
 
 질문: {question}
-정보: {context}
+
 답변:"""
 
     # 사용자 입력
@@ -190,6 +197,30 @@ def main():
 
             if retriever:
                 try:
+                    # 대화 히스토리 포맷팅 (최근 5개만 사용)
+                    def format_chat_history(messages):
+                        if not messages:
+                            return "이전 대화 없음"
+
+                        history_text = []
+                        # 최근 5개 대화만 사용 (현재 질문 제외)
+                        recent_messages = messages[-6:-1] if len(messages) > 1 else []
+
+                        for msg in recent_messages:
+                            role = "사용자" if msg.role == "user" else "챗봇"
+                            history_text.append(f"{role}: {msg.content}")
+
+                        return "\n".join(history_text) if history_text else "이전 대화 없음"
+
+                    chat_history = format_chat_history(st.session_state.messages)
+
+                    # 검색 결과 확인 (디버깅)
+                    retrieved_docs = retriever.get_relevant_documents(user_input)
+                    logger.info(f"검색 질문: {user_input}")
+                    logger.info(f"검색된 문서 수: {len(retrieved_docs)}")
+                    for i, doc in enumerate(retrieved_docs[:3]):
+                        logger.info(f"문서 {i+1}: {doc.page_content[:100]}...")
+
                     # LLM 연결
                     llm = RemoteRunnable(DEFAULT_LLM_URL)
 
@@ -205,6 +236,7 @@ def main():
                         {
                             "context": retriever | format_docs,
                             "question": RunnablePassthrough(),
+                            "chat_history": lambda _: chat_history,
                         }
                         | prompt
                         | llm
