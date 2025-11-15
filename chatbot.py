@@ -151,11 +151,11 @@ def initialize_rag_system():
 
 def main():
     st.set_page_config(
-        page_title="챗봇",
+        page_title="퓨쳐시스템 인트라넷 챗봇",
         page_icon=""
     )
 
-    st.title(":blue[챗봇]")
+    st.title(":blue[퓨쳐시스템 인트라넷 챗봇]")
 
     # 메시지 초기화
     if "messages" not in st.session_state:
