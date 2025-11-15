@@ -186,30 +186,48 @@ def build_prompt(context, is_meta_question, recent_messages, user_input):
     """프롬프트 구성"""
     if is_meta_question:
         # 메타 질문: 이전 대화 자체에 대한 작업 (번역, 요약 등)
-        prompt = """You are an AI assistant.
+        prompt = """SYSTEM: You are a helpful AI assistant specialized in conversation operations like translation, summarization, and reformatting.
 
-The user is asking you to perform an operation on the previous conversation.
-Examples: translate to another language (English, Japanese, Chinese, Korean, etc.), summarize, explain, rephrase, etc.
+INSTRUCTION: The user wants you to perform an operation on their previous conversation history. You must complete the user's request by processing ALL messages in the conversation history.
 
-IMPORTANT: The conversation history below may include various topics:
-- Company-related questions (Future Systems)
-- General knowledge questions (geography, science, culture, etc.)
-- Any other topics
+EXAMPLES:
+Example 1 - Translation to English:
+Conversation History:
+User: 일본의 수도는?
+Assistant: 도쿄입니다.
 
-Your task is to perform the requested operation on ALL the conversation history regardless of the topic.
-Maintain the original Q&A format when translating or processing.
+User Request: 이전 대화를 영어로 변경해줘
+
+Response:
+User: What is the capital of Japan?
+Assistant: It is Tokyo.
+
+Example 2 - Translation to Japanese:
+Conversation History:
+User: 정원규 직급은?
+Assistant: 대표이사입니다.
+
+User Request: 이전 대화를 일본어로
+
+Response:
+ユーザー: チョン・ウォンギュの役職は何ですか？
+アシスタント: 代表理事です。
+
+---
+
+NOW PERFORM THE SAME TASK:
 
 """
         # 히스토리를 명확하게 표시
         if recent_messages:
-            prompt += "=== CONVERSATION HISTORY ===\n"
-            for i, msg in enumerate(recent_messages):
+            prompt += "Conversation History:\n"
+            for msg in recent_messages:
                 role = "User" if msg.type == "human" else "Assistant"
                 prompt += f"{role}: {msg.content}\n"
-            prompt += "=== END OF HISTORY ===\n\n"
+            prompt += "\n"
 
-        prompt += f"User's request: {user_input}\n\n"
-        prompt += "Your response (perform the requested operation on the entire conversation above):"
+        prompt += f"User Request: {user_input}\n\n"
+        prompt += "Response:"
 
     else:
         # 일반 질문: 검색 정보 + 히스토리 균형
@@ -306,23 +324,27 @@ def main():
                     user_input, bool(msgs.messages)
                 )
 
-                # 검색 쿼리 향상
-                search_query = user_input
-                if (is_followup or is_meta_question) and msgs.messages:
-                    recent_context = extract_recent_context(msgs.messages)
-                    if recent_context:
-                        search_query = " ".join(recent_context) + " " + user_input
-                        logger.info(f"향상된 검색 쿼리: {search_query}")
+                # 메타 질문이 아닐 때만 검색 실행
+                context = ""
+                if not is_meta_question:
+                    # 검색 쿼리 향상
+                    search_query = user_input
+                    if is_followup and msgs.messages:
+                        recent_context = extract_recent_context(msgs.messages)
+                        if recent_context:
+                            search_query = " ".join(recent_context) + " " + user_input
+                            logger.info(f"향상된 검색 쿼리: {search_query}")
 
-                # 검색 실행
-                retrieved_docs = retriever.invoke(search_query)
-                logger.info(f"원본 질문: {user_input}")
-                logger.info(f"검색 쿼리: {search_query}")
-                logger.info(f"메타 질문: {is_meta_question}")
-                logger.info(f"검색된 문서 수: {len(retrieved_docs)}")
+                    # 검색 실행
+                    retrieved_docs = retriever.invoke(search_query)
+                    logger.info(f"원본 질문: {user_input}")
+                    logger.info(f"검색 쿼리: {search_query}")
+                    logger.info(f"검색된 문서 수: {len(retrieved_docs)}")
 
-                # 문서 포맷팅
-                context = "\n\n".join(doc.page_content for doc in retrieved_docs)
+                    # 문서 포맷팅
+                    context = "\n\n".join(doc.page_content for doc in retrieved_docs)
+                else:
+                    logger.info(f"메타 질문 감지: {user_input} - 검색 스킵")
 
                 # LLM 연결
                 llm = RemoteRunnable(DEFAULT_LLM_URL)
