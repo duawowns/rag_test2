@@ -164,25 +164,22 @@ def main():
     # RAG 시스템 초기화 (자동, 캐싱)
     retriever = initialize_rag_system()
 
-    if "messages" not in st.session_state or len(st.session_state["messages"]) == 0:
-        st.session_state["messages"] = [
-            ChatMessage(role="assistant", content="안녕하세요! 회사 및 직원 정보에 대해 궁금하신 점을 물어보세요!")
-        ]
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = []
 
     # 대화 기록 출력
     for msg in st.session_state.messages:
         st.chat_message(msg.role).write(msg.content)
 
-    RAG_PROMPT_TEMPLATE = """당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
-검색된 문서 내용을 바탕으로 회사 및 직원 정보에 대한 질문에 친절하고 정확하게 답변해주세요.
-특히 전화번호, 이메일, 부서 등의 정보는 검색된 내용을 정확히 그대로 제공하세요.
+    RAG_PROMPT_TEMPLATE = """아래 정보를 바탕으로 질문에 답변하세요.
+전화번호, 이메일 등의 정보는 정확히 제공하세요.
 
-Question: {question}
-Context: {context}
-Answer:"""
+질문: {question}
+정보: {context}
+답변:"""
 
     # 사용자 입력
-    if user_input := st.chat_input("궁금한 점을 물어보세요..."):
+    if user_input := st.chat_input("질문을 입력하세요"):
         # 사용자 메시지 추가
         st.session_state.messages.append(ChatMessage(role="user", content=user_input))
         st.chat_message("user").write(user_input)
