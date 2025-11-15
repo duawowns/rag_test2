@@ -198,11 +198,16 @@ def main():
 
         if retriever:
             try:
+                # 메타 질문 감지 (이전 대화 참조, follow-up 질문)
+                meta_keywords = ["이전", "그", "그사람", "방금", "아까", "위", "앞서"]
+                is_meta_question = any(keyword in user_input for keyword in meta_keywords)
+                is_followup = len(user_input.split()) <= 3 and msgs.messages
+
                 # 검색 쿼리 향상 (히스토리 컨텍스트 포함)
                 search_query = user_input
 
-                # 짧은 질문인 경우 히스토리에서 컨텍스트 추가
-                if len(user_input.split()) <= 3 and msgs.messages:
+                # Follow-up 질문이거나 메타 질문인 경우 히스토리에서 컨텍스트 추가
+                if (is_followup or is_meta_question) and msgs.messages:
                     # 최근 2개의 사용자 메시지에서 컨텍스트 추출
                     recent_context = []
                     for msg in reversed(msgs.messages[-4:]):  # 최근 4개 메시지 확인
@@ -220,6 +225,7 @@ def main():
                 retrieved_docs = retriever.invoke(search_query)
                 logger.info(f"원본 질문: {user_input}")
                 logger.info(f"검색 쿼리: {search_query}")
+                logger.info(f"메타 질문: {is_meta_question}")
                 logger.info(f"검색된 문서 수: {len(retrieved_docs)}")
                 for i, doc in enumerate(retrieved_docs[:3]):
                     logger.info(f"문서 {i+1}: {doc.page_content[:100]}...")
@@ -230,8 +236,21 @@ def main():
                 # LLM 연결
                 llm = RemoteRunnable(DEFAULT_LLM_URL)
 
-                # 프롬프트 구성
-                full_prompt = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
+                # 프롬프트 구성 (메타 질문 여부에 따라 다르게)
+                if is_meta_question:
+                    # 메타 질문: 이전 대화에 집중
+                    full_prompt = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
+
+사용자가 이전 대화를 참조하는 질문을 했습니다. 반드시 아래 "최근 대화 기록"을 참고하여 답변하세요.
+
+참고용 검색 정보:
+{context}
+---
+
+"""
+                else:
+                    # 일반 질문: 검색 정보 + 히스토리 균형있게
+                    full_prompt = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
 
 검색된 회사 정보가 질문과 관련이 있다면 그 정보를 우선적으로 사용하여 정확하게 답변하세요.
 검색된 정보가 질문과 관련이 없거나 충분하지 않다면 일반 지식을 사용하여 친절하게 답변하세요.
@@ -243,18 +262,18 @@ def main():
 
 """
 
-                # 최근 히스토리만 추가 (최근 6개 메시지, 3턴)
+                # 최근 히스토리만 추가 (최근 8개 메시지, 4턴)
                 if msgs.messages:
-                    recent_messages = msgs.messages[-6:]  # 최근 3턴 (6개 메시지)
+                    recent_messages = msgs.messages[-8:]  # 최근 4턴 (8개 메시지)
                     if recent_messages:
-                        full_prompt += "최근 대화:\n"
+                        full_prompt += "최근 대화 기록 (맥락 파악용):\n"
                         for msg in recent_messages:
-                            role = "사용자" if msg.type == "human" else "어시스턴트"
-                            full_prompt += f"{role}: {msg.content}\n"
+                            role = "사용자" if msg.type == "human" else "AI"
+                            full_prompt += f"- {role}: {msg.content}\n"
                         full_prompt += "\n"
 
                 # 현재 질문 (명확하게 구분)
-                full_prompt += f"현재 질문: {user_input}\n\n답변 (간결하고 정확하게, 프롬프트 형식 없이 내용만):"
+                full_prompt += f"현재 사용자 질문: {user_input}\n\n답변:"
 
                 logger.info(f"Full prompt length: {len(full_prompt)}")
 
@@ -280,20 +299,24 @@ def main():
                     # 프롬프트 패턴 제거 (후처리)
                     final_response = final_response.strip()
 
-                    # 모든 프롬프트 패턴 제거 (앞, 뒤, 중간)
-                    # "Q: ..." 나 "A: ..." 패턴 제거
-                    final_response = re.sub(r'^[QA]:\s*', '', final_response)
-                    final_response = re.sub(r'\n[QA]:\s*', '\n', final_response)
+                    # 1. 프롬프트 형식 패턴 제거
+                    patterns_to_clean = [
+                        (r'^[QA]:\s*', ''),  # Q: A: 제거
+                        (r'\n[QA]:\s*', '\n'),  # 중간의 Q: A: 제거
+                        (r'^(사용자|어시스턴트|AI):\s*', ''),  # 역할 레이블 제거
+                        (r'\n(사용자|어시스턴트|AI):\s*', '\n'),
+                        (r'^답변\s*[:：]\s*', ''),  # "답변:" 제거
+                        (r'현재.*?질문\s*[:：].*?\n', ''),  # "현재 질문: ..." 제거
+                    ]
 
-                    # "사용자:" "어시스턴트:" 패턴 제거
-                    final_response = re.sub(r'^(사용자|어시스턴트):\s*', '', final_response)
-                    final_response = re.sub(r'\n(사용자|어시스턴트):\s*', '\n', final_response)
-
-                    # "현재 질문:" 같은 메타 텍스트 제거
-                    final_response = re.sub(r'현재 질문:.*?\n', '', final_response)
-                    final_response = re.sub(r'답변.*?:', '', final_response, count=1)
+                    for pattern, replacement in patterns_to_clean:
+                        final_response = re.sub(pattern, replacement, final_response, flags=re.MULTILINE)
 
                     final_response = final_response.strip()
+
+                    # 2. 중복 공백 정리
+                    final_response = re.sub(r'\n\s*\n', '\n\n', final_response)  # 여러 빈 줄 → 2개로
+                    final_response = re.sub(r'\n{3,}', '\n\n', final_response)  # 3개 이상 빈 줄 → 2개로
 
                     # 정리된 응답 표시
                     if final_response:
