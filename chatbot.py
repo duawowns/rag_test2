@@ -165,6 +165,45 @@ def extract_recent_context(messages, max_messages=4):
                 break
     return list(reversed(recent_context))
 
+def extract_most_recent_entity(messages):
+    """가장 최근에 언급된 엔티티(인물, 회사명 등) 추출"""
+    # 최근 2턴(4개 메시지)만 확인
+    recent_msgs = messages[-4:] if len(messages) >= 4 else messages
+
+    # 일반적인 엔티티 패턴 (한국어 이름, 회사명 등)
+    entities = []
+
+    for msg in reversed(recent_msgs):
+        if msg.type == "human":
+            # 한글 이름 패턴 (2-4자)
+            names = re.findall(r'[가-힣]{2,4}(?=의|이|은|는|를|을|에게|한테)', msg.content)
+            entities.extend(names)
+
+            # 특정 키워드 체크
+            if "퓨쳐시스템" in msg.content or "Future Systems" in msg.content:
+                entities.append("퓨쳐시스템")
+
+    # 가장 최근 엔티티 반환
+    return entities[0] if entities else None
+
+def rewrite_followup_query(user_input, recent_messages):
+    """Follow-up 질문을 standalone 질문으로 재작성"""
+    # 가장 최근 엔티티 추출
+    entity = extract_most_recent_entity(recent_messages)
+
+    if not entity:
+        return user_input
+
+    # "전화번호는?", "이메일은?", "직급은?" 같은 패턴
+    simple_patterns = ["전화번호", "이메일", "직급", "부서", "담당업무", "주소", "연락처"]
+
+    for pattern in simple_patterns:
+        if pattern in user_input and len(user_input) <= 15:
+            # "전화번호는?" → "염재준의 전화번호는?"
+            return f"{entity}의 {user_input}"
+
+    return user_input
+
 def is_meta_or_followup_question(user_input, has_history):
     """메타 질문 또는 follow-up 질문 감지"""
     # 대화 참조 키워드
@@ -242,13 +281,27 @@ NOW PERFORM THE SAME TASK:
 ---
 
 """
-        # 히스토리 추가 (일반 질문)
+        # 히스토리 추가 (일반 질문) - 최근 2턴만
         if recent_messages:
-            prompt += "최근 대화:\n"
-            for msg in recent_messages:
-                role = "사용자" if msg.type == "human" else "AI"
-                prompt += f"{role}: {msg.content}\n"
-            prompt += "\n"
+            # 최근 2턴(4개 메시지)만 사용
+            recent_short = recent_messages[-4:] if len(recent_messages) > 4 else recent_messages
+
+            if recent_short:
+                prompt += "최근 대화 (가장 최근 주제 우선):\n"
+                for msg in recent_short:
+                    role = "사용자" if msg.type == "human" else "AI"
+                    prompt += f"{role}: {msg.content}\n"
+
+                # 가장 최근 주제 강조
+                last_human_msg = None
+                for msg in reversed(recent_short):
+                    if msg.type == "human":
+                        last_human_msg = msg.content
+                        break
+
+                if last_human_msg:
+                    prompt += f"\n중요: 현재 대화는 '{last_human_msg}'에 대한 것입니다.\n"
+                prompt += "\n"
 
         # 현재 질문
         prompt += f"현재 질문: {user_input}\n\n답변:"
@@ -327,13 +380,19 @@ def main():
                 # 메타 질문이 아닐 때만 검색 실행
                 context = ""
                 if not is_meta_question:
-                    # 검색 쿼리 향상
+                    # Query Rewriting: follow-up 질문을 standalone으로 재작성
                     search_query = user_input
                     if is_followup and msgs.messages:
-                        recent_context = extract_recent_context(msgs.messages)
-                        if recent_context:
-                            search_query = " ".join(recent_context) + " " + user_input
-                            logger.info(f"향상된 검색 쿼리: {search_query}")
+                        rewritten_query = rewrite_followup_query(user_input, msgs.messages)
+                        if rewritten_query != user_input:
+                            search_query = rewritten_query
+                            logger.info(f"Query Rewriting: '{user_input}' → '{search_query}'")
+                        else:
+                            # 재작성 실패 시 기존 방식 사용
+                            recent_context = extract_recent_context(msgs.messages)
+                            if recent_context:
+                                search_query = " ".join(recent_context) + " " + user_input
+                                logger.info(f"컨텍스트 추가: {search_query}")
 
                     # 검색 실행
                     retrieved_docs = retriever.invoke(search_query)
@@ -349,8 +408,8 @@ def main():
                 # LLM 연결
                 llm = RemoteRunnable(DEFAULT_LLM_URL)
 
-                # 프롬프트 구성
-                recent_messages = msgs.messages[-8:] if msgs.messages else []
+                # 프롬프트 구성 (최근 4개 메시지 = 2턴만 사용)
+                recent_messages = msgs.messages[-4:] if msgs.messages else []
                 full_prompt = build_prompt(context, is_meta_question, recent_messages, user_input)
                 logger.info(f"Full prompt length: {len(full_prompt)}")
 
