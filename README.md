@@ -38,11 +38,22 @@ A: 정원규님은 퓨쳐시스템 대표이사으로, 전사 경영 총괄을(�
 
 ## 데이터
 
-### 직원 정보 (company_data.csv)
+### 직원 정보 (company_data.csv) - 2명
 - 정원규 (대표이사) - 010-777-7777
 - 염재준 (사원, VPN팀) - 010-3839-3418
 
-### 회사 소개 (futuresystems_company_brochure.pdf)
+### 회사 소개 (company_info_data.csv) - 200개 항목
+- 회사 기본정보 10개
+- VPN 제품 30개
+- 보안 솔루션 30개
+- 클라우드 서비스 20개
+- 주요 고객사 30개
+- 기술 인증 20개
+- 프로젝트 실적 30개
+- 기술 스택 20개
+- 수상 실적 10개
+
+### 회사 소개 PDF (futuresystems_company_brochure.pdf)
 - 회사 비전, 사업 분야, 기술력 등
 
 ## ngrok URL 변경

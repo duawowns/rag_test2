@@ -16,7 +16,8 @@ from langchain_core.runnables import RunnablePassthrough
 from langserve import RemoteRunnable
 
 # 설정
-CSV_DATA_PATH = "company_data.csv"
+CSV_EMPLOYEE_PATH = "company_data.csv"  # 직원 데이터 (2명)
+CSV_COMPANY_INFO_PATH = "company_info_data.csv"  # 회사 소개 데이터 (200개)
 PDF_DATA_PATH = "futuresystems_company_brochure.pdf"
 DEFAULT_LLM_URL = "https://dioramic-corrin-undetractively.ngrok-free.dev/llm/"
 
@@ -25,8 +26,8 @@ def tiktoken_len(text):
     tokens = tokenizer.encode(text)
     return len(tokens)
 
-def load_csv_data(csv_path):
-    """CSV 데이터를 Document 형식으로 로드"""
+def load_employee_csv(csv_path):
+    """직원 CSV 데이터를 Document 형식으로 로드"""
     df = pd.read_csv(csv_path)
     documents = []
 
@@ -46,6 +47,27 @@ def load_csv_data(csv_path):
                 "name": row['이름'],
                 "position": row['직급'],
                 "phone": row['전화번호']
+            }
+        )
+        documents.append(doc)
+
+    return documents
+
+def load_company_info_csv(csv_path):
+    """회사 소개 CSV 데이터를 Document 형식으로 로드"""
+    df = pd.read_csv(csv_path)
+    documents = []
+
+    for idx, row in df.iterrows():
+        content = f"""[{row['카테고리']}] {row['항목']}
+{row['내용']}"""
+
+        doc = Document(
+            page_content=content,
+            metadata={
+                "source": "company_info_data.csv",
+                "category": row['카테고리'],
+                "item": row['항목']
             }
         )
         documents.append(doc)
@@ -94,20 +116,28 @@ def initialize_rag_system():
     with st.spinner("데이터 로딩 중..."):
         all_docs = []
 
-        # CSV 로드
+        # 직원 CSV 로드
         try:
-            csv_docs = load_csv_data(CSV_DATA_PATH)
-            all_docs.extend(csv_docs)
-            st.success(f"✅ 직원 데이터 로드: {len(csv_docs)}명")
+            employee_docs = load_employee_csv(CSV_EMPLOYEE_PATH)
+            all_docs.extend(employee_docs)
+            st.success(f"✅ 직원 데이터 로드: {len(employee_docs)}명")
         except Exception as e:
-            st.warning(f"CSV 로드 실패: {e}")
+            st.warning(f"직원 CSV 로드 실패: {e}")
+
+        # 회사 소개 CSV 로드 (200개)
+        try:
+            company_info_docs = load_company_info_csv(CSV_COMPANY_INFO_PATH)
+            all_docs.extend(company_info_docs)
+            st.success(f"✅ 회사 소개 데이터 로드: {len(company_info_docs)}개 항목")
+        except Exception as e:
+            st.warning(f"회사 소개 CSV 로드 실패: {e}")
 
         # PDF 로드
         try:
             pdf_docs = load_pdf_data(PDF_DATA_PATH)
             pdf_chunks = get_text_chunks(pdf_docs)
             all_docs.extend(pdf_chunks)
-            st.success(f"✅ 회사 소개 자료 로드: {len(pdf_chunks)}개 청크")
+            st.success(f"✅ PDF 회사 소개 자료 로드: {len(pdf_chunks)}개 청크")
         except Exception as e:
             st.warning(f"PDF 로드 실패: {e}")
 
@@ -150,8 +180,9 @@ def main():
         st.divider()
         st.info("""
         **자동 로드됨:**
-        - 직원 데이터 (CSV)
-        - 회사 소개 (PDF)
+        - 직원 데이터 2명 (CSV)
+        - 회사 소개 200개 항목 (CSV)
+        - 회사 소개 자료 (PDF)
 
         바로 질문하세요!
         """)
