@@ -189,7 +189,7 @@ def main():
         if retriever:
             try:
                 # 검색 결과 확인 (디버깅)
-                retrieved_docs = retriever.get_relevant_documents(user_input)
+                retrieved_docs = retriever.invoke(user_input)
                 logger.info(f"검색 질문: {user_input}")
                 logger.info(f"검색된 문서 수: {len(retrieved_docs)}")
                 for i, doc in enumerate(retrieved_docs[:3]):
