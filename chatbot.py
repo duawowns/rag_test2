@@ -176,15 +176,23 @@ def build_prompt(context, is_meta_question, recent_messages, user_input):
     """프롬프트 구성"""
     if is_meta_question:
         # 메타 질문: 이전 대화에 집중
-        prompt = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
+        prompt = """You are a Future Systems company introduction AI assistant.
 
-사용자가 이전 대화를 참조하는 질문을 했습니다. 반드시 아래 "최근 대화 기록"을 참고하여 답변하세요.
-
-참고용 검색 정보:
-{context}
----
+The user is asking you to perform an operation on the previous conversation (e.g., translate, summarize, explain, etc.).
+You must use the conversation history below to complete the user's request accurately.
 
 """
+        # 히스토리를 명확하게 표시
+        if recent_messages:
+            prompt += "=== CONVERSATION HISTORY ===\n"
+            for i, msg in enumerate(recent_messages):
+                role = "User" if msg.type == "human" else "Assistant"
+                prompt += f"{role}: {msg.content}\n"
+            prompt += "=== END OF HISTORY ===\n\n"
+
+        prompt += f"User's request: {user_input}\n\n"
+        prompt += "Your response (perform the requested operation on the conversation history above):"
+
     else:
         # 일반 질문: 검색 정보 + 히스토리 균형
         prompt = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
@@ -198,17 +206,16 @@ def build_prompt(context, is_meta_question, recent_messages, user_input):
 ---
 
 """
+        # 히스토리 추가 (일반 질문)
+        if recent_messages:
+            prompt += "최근 대화:\n"
+            for msg in recent_messages:
+                role = "사용자" if msg.type == "human" else "AI"
+                prompt += f"{role}: {msg.content}\n"
+            prompt += "\n"
 
-    # 히스토리 추가
-    if recent_messages:
-        prompt += "최근 대화 기록 (맥락 파악용):\n"
-        for msg in recent_messages:
-            role = "사용자" if msg.type == "human" else "AI"
-            prompt += f"- {role}: {msg.content}\n"
-        prompt += "\n"
-
-    # 현재 질문
-    prompt += f"현재 사용자 질문: {user_input}\n\n답변:"
+        # 현재 질문
+        prompt += f"현재 질문: {user_input}\n\n답변:"
 
     return prompt
 
