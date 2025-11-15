@@ -210,30 +210,29 @@ def main():
                 # LLM 연결
                 llm = RemoteRunnable(DEFAULT_LLM_URL)
 
-                # 프롬프트 구성 - 시스템 메시지 + 히스토리 + 현재 질문
-                system_message = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
+                # 프롬프트 구성
+                full_prompt = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
 
-아래 검색된 회사 정보가 질문과 관련이 있다면, 그 정보를 우선적으로 사용하여 정확하게 답변하세요.
-검색된 정보가 질문과 관련이 없거나 충분하지 않다면, 당신의 일반 지식을 사용하여 친절하게 답변하세요.
-
-특히 회사 직원의 전화번호, 이메일, 주소 등은 검색된 정보를 정확히 그대로 제공하세요.
+검색된 회사 정보가 질문과 관련이 있다면 그 정보를 우선적으로 사용하여 정확하게 답변하세요.
+검색된 정보가 질문과 관련이 없거나 충분하지 않다면 일반 지식을 사용하여 친절하게 답변하세요.
+특히 회사 직원의 전화번호, 이메일, 주소 등은 검색된 정보를 정확히 제공하세요.
 
 검색된 회사 정보:
-{context}"""
+{context}
+---
 
-                # 전체 프롬프트 구성
-                full_prompt = system_message + "\n\n"
+"""
 
                 # 히스토리 추가
                 if msgs.messages:
-                    full_prompt += "이전 대화:\n"
                     for msg in msgs.messages:
-                        role = "사용자" if msg.type == "human" else "어시스턴트"
-                        full_prompt += f"{role}: {msg.content}\n"
-                    full_prompt += "\n"
+                        if msg.type == "human":
+                            full_prompt += f"Q: {msg.content}\n"
+                        else:
+                            full_prompt += f"A: {msg.content}\n"
 
                 # 현재 질문
-                full_prompt += f"사용자: {user_input}\n어시스턴트:"
+                full_prompt += f"Q: {user_input}\nA:"
 
                 logger.info(f"Full prompt length: {len(full_prompt)}")
 
@@ -256,7 +255,20 @@ def main():
                     final_response = "".join(chunks)
                     logger.info(f"Final response length: {len(final_response)}")
 
+                    # 프롬프트 패턴 제거 (후처리)
+                    final_response = final_response.strip()
+                    patterns_to_remove = ["사용자:", "어시스턴트:", "Q:", "A:"]
+                    for pattern in patterns_to_remove:
+                        # 앞쪽 제거
+                        if final_response.startswith(pattern):
+                            final_response = final_response[len(pattern):].strip()
+                        # 뒤쪽 제거
+                        if final_response.endswith(pattern):
+                            final_response = final_response[:-len(pattern)].strip()
+
+                    # 정리된 응답 표시
                     if final_response:
+                        chat_container.markdown(final_response)
                         msgs.add_user_message(user_input)
                         msgs.add_ai_message(final_response)
                     else:
