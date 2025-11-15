@@ -5,7 +5,7 @@ import torch
 import pandas as pd
 
 from langchain_core.messages import ChatMessage
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.document_loaders import Docx2txtLoader
