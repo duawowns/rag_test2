@@ -100,15 +100,38 @@ def get_vectorstore(text_chunks):
 
 def extract_text_from_chunk(chunk):
     """응답 텍스트 추출"""
+    # 문자열인 경우
     if isinstance(chunk, str):
         return chunk
+
+    # dict인 경우
     elif isinstance(chunk, dict):
-        content = chunk.get('content', '') or chunk.get('text', '')
-        return content if content else ''
-    elif hasattr(chunk, 'content'):
-        return chunk.content if chunk.content else ''
-    else:
+        # 여러 가지 키 시도
+        for key in ['content', 'text', 'output', 'answer', 'response']:
+            if key in chunk and chunk[key]:
+                return str(chunk[key])
         return ''
+
+    # content 속성이 있는 경우 (AIMessage, AIMessageChunk 등)
+    elif hasattr(chunk, 'content'):
+        content = chunk.content
+        if isinstance(content, str):
+            return content
+        elif isinstance(content, list) and len(content) > 0:
+            # content가 리스트인 경우 (일부 LLM)
+            return str(content[0]) if content[0] else ''
+        return str(content) if content else ''
+
+    # text 속성이 있는 경우
+    elif hasattr(chunk, 'text'):
+        return str(chunk.text) if chunk.text else ''
+
+    # 기타 타입은 문자열로 변환 시도
+    else:
+        try:
+            return str(chunk)
+        except:
+            return ''
 
 @st.cache_resource
 def initialize_rag_system():
@@ -218,16 +241,25 @@ def main():
                     chunks = []
 
                     for chunk in chain.stream({}):
+                        logger.info(f"Chunk type: {type(chunk)}, content: {chunk}")
                         chunk_text = extract_text_from_chunk(chunk)
                         if chunk_text:
                             chunks.append(chunk_text)
                             chat_container.markdown("".join(chunks))
+                        else:
+                            logger.warning(f"Empty chunk_text from chunk: {chunk}")
 
                     # 응답을 히스토리에 추가
                     final_response = "".join(chunks)
+                    logger.info(f"Final response length: {len(final_response)}")
+
                     if final_response:
                         msgs.add_user_message(user_input)
                         msgs.add_ai_message(final_response)
+                    else:
+                        logger.error("No response generated from LLM")
+                        error_msg = "LLM에서 응답을 생성하지 못했습니다."
+                        chat_container.error(error_msg)
 
             except Exception as e:
                 error_msg = f"오류가 발생했습니다: {str(e)}"
