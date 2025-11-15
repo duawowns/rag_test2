@@ -167,19 +167,37 @@ def extract_recent_context(messages, max_messages=4):
 
 def is_meta_or_followup_question(user_input, has_history):
     """메타 질문 또는 follow-up 질문 감지"""
-    meta_keywords = ["이전", "그", "그사람", "방금", "아까", "위", "앞서"]
-    is_meta = any(keyword in user_input for keyword in meta_keywords)
-    is_followup = len(user_input.split()) <= 3 and has_history
+    # 대화 참조 키워드
+    reference_keywords = ["이전", "그", "그사람", "방금", "아까", "위", "앞서"]
+
+    # 언어/변환 키워드
+    language_keywords = ["영어", "일본어", "중국어", "한국어", "번역", "translate", "요약", "summarize", "변경"]
+
+    # 메타 질문: 대화 참조 + 언어/변환 키워드
+    has_reference = any(keyword in user_input for keyword in reference_keywords)
+    has_language = any(keyword in user_input for keyword in language_keywords)
+
+    is_meta = has_reference or (has_language and has_history)
+    is_followup = len(user_input.split()) <= 3 and has_history and not has_language
+
     return is_meta, is_followup
 
 def build_prompt(context, is_meta_question, recent_messages, user_input):
     """프롬프트 구성"""
     if is_meta_question:
-        # 메타 질문: 이전 대화에 집중
-        prompt = """You are a Future Systems company introduction AI assistant.
+        # 메타 질문: 이전 대화 자체에 대한 작업 (번역, 요약 등)
+        prompt = """You are an AI assistant.
 
-The user is asking you to perform an operation on the previous conversation (e.g., translate, summarize, explain, etc.).
-You must use the conversation history below to complete the user's request accurately.
+The user is asking you to perform an operation on the previous conversation.
+Examples: translate to another language (English, Japanese, Chinese, Korean, etc.), summarize, explain, rephrase, etc.
+
+IMPORTANT: The conversation history below may include various topics:
+- Company-related questions (Future Systems)
+- General knowledge questions (geography, science, culture, etc.)
+- Any other topics
+
+Your task is to perform the requested operation on ALL the conversation history regardless of the topic.
+Maintain the original Q&A format when translating or processing.
 
 """
         # 히스토리를 명확하게 표시
@@ -191,7 +209,7 @@ You must use the conversation history below to complete the user's request accur
             prompt += "=== END OF HISTORY ===\n\n"
 
         prompt += f"User's request: {user_input}\n\n"
-        prompt += "Your response (perform the requested operation on the conversation history above):"
+        prompt += "Your response (perform the requested operation on the entire conversation above):"
 
     else:
         # 일반 질문: 검색 정보 + 히스토리 균형
