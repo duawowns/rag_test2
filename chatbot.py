@@ -4,15 +4,11 @@ from loguru import logger
 import pandas as pd
 import re
 
-from langchain_core.messages import ChatMessage
 from langchain_core.documents import Document
-
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
-
 from langchain_community.vectorstores import FAISS
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.chat_message_histories import StreamlitChatMessageHistory
 from langserve import RemoteRunnable
 
@@ -134,6 +130,95 @@ def extract_text_from_chunk(chunk):
         except:
             return ''
 
+def clean_response_text(response):
+    """LLM 응답에서 프롬프트 패턴 제거"""
+    response = response.strip()
+
+    # 프롬프트 형식 패턴 제거
+    patterns_to_clean = [
+        (r'^[QA]:\s*', ''),
+        (r'\n[QA]:\s*', '\n'),
+        (r'^(사용자|어시스턴트|AI):\s*', ''),
+        (r'\n(사용자|어시스턴트|AI):\s*', '\n'),
+        (r'^답변\s*[:：]\s*', ''),
+        (r'현재.*?질문\s*[:：].*?\n', ''),
+    ]
+
+    for pattern, replacement in patterns_to_clean:
+        response = re.sub(pattern, replacement, response, flags=re.MULTILINE)
+
+    response = response.strip()
+
+    # 중복 공백 정리
+    response = re.sub(r'\n\s*\n', '\n\n', response)
+    response = re.sub(r'\n{3,}', '\n\n', response)
+
+    return response
+
+def extract_recent_context(messages, max_messages=4):
+    """최근 사용자 메시지에서 컨텍스트 추출"""
+    recent_context = []
+    for msg in reversed(messages[-max_messages:]):
+        if msg.type == "human":
+            recent_context.append(msg.content)
+            if len(recent_context) >= 2:
+                break
+    return list(reversed(recent_context))
+
+def is_meta_or_followup_question(user_input, has_history):
+    """메타 질문 또는 follow-up 질문 감지"""
+    meta_keywords = ["이전", "그", "그사람", "방금", "아까", "위", "앞서"]
+    is_meta = any(keyword in user_input for keyword in meta_keywords)
+    is_followup = len(user_input.split()) <= 3 and has_history
+    return is_meta, is_followup
+
+def build_prompt(context, is_meta_question, recent_messages, user_input):
+    """프롬프트 구성"""
+    if is_meta_question:
+        # 메타 질문: 이전 대화에 집중
+        prompt = """You are a Future Systems company introduction AI assistant.
+
+The user is asking you to perform an operation on the previous conversation (e.g., translate, summarize, explain, etc.).
+You must use the conversation history below to complete the user's request accurately.
+
+"""
+        # 히스토리를 명확하게 표시
+        if recent_messages:
+            prompt += "=== CONVERSATION HISTORY ===\n"
+            for i, msg in enumerate(recent_messages):
+                role = "User" if msg.type == "human" else "Assistant"
+                prompt += f"{role}: {msg.content}\n"
+            prompt += "=== END OF HISTORY ===\n\n"
+
+        prompt += f"User's request: {user_input}\n\n"
+        prompt += "Your response (perform the requested operation on the conversation history above):"
+
+    else:
+        # 일반 질문: 검색 정보 + 히스토리 균형
+        prompt = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
+
+검색된 회사 정보가 질문과 관련이 있다면 그 정보를 우선적으로 사용하여 정확하게 답변하세요.
+검색된 정보가 질문과 관련이 없거나 충분하지 않다면 일반 지식을 사용하여 친절하게 답변하세요.
+특히 회사 직원의 전화번호, 이메일, 주소 등은 검색된 정보를 정확히 제공하세요.
+
+검색된 회사 정보:
+{context}
+---
+
+"""
+        # 히스토리 추가 (일반 질문)
+        if recent_messages:
+            prompt += "최근 대화:\n"
+            for msg in recent_messages:
+                role = "사용자" if msg.type == "human" else "AI"
+                prompt += f"{role}: {msg.content}\n"
+            prompt += "\n"
+
+        # 현재 질문
+        prompt += f"현재 질문: {user_input}\n\n답변:"
+
+    return prompt
+
 @st.cache_resource
 def initialize_rag_system():
     """RAG 시스템 초기화 (자동)"""
@@ -198,27 +283,17 @@ def main():
 
         if retriever:
             try:
-                # 메타 질문 감지 (이전 대화 참조, follow-up 질문)
-                meta_keywords = ["이전", "그", "그사람", "방금", "아까", "위", "앞서"]
-                is_meta_question = any(keyword in user_input for keyword in meta_keywords)
-                is_followup = len(user_input.split()) <= 3 and msgs.messages
+                # 메타/follow-up 질문 감지
+                is_meta_question, is_followup = is_meta_or_followup_question(
+                    user_input, bool(msgs.messages)
+                )
 
-                # 검색 쿼리 향상 (히스토리 컨텍스트 포함)
+                # 검색 쿼리 향상
                 search_query = user_input
-
-                # Follow-up 질문이거나 메타 질문인 경우 히스토리에서 컨텍스트 추가
                 if (is_followup or is_meta_question) and msgs.messages:
-                    # 최근 2개의 사용자 메시지에서 컨텍스트 추출
-                    recent_context = []
-                    for msg in reversed(msgs.messages[-4:]):  # 최근 4개 메시지 확인
-                        if msg.type == "human":
-                            recent_context.append(msg.content)
-                            if len(recent_context) >= 2:
-                                break
-
+                    recent_context = extract_recent_context(msgs.messages)
                     if recent_context:
-                        # 최근 컨텍스트와 현재 질문 결합
-                        search_query = " ".join(reversed(recent_context)) + " " + user_input
+                        search_query = " ".join(recent_context) + " " + user_input
                         logger.info(f"향상된 검색 쿼리: {search_query}")
 
                 # 검색 실행
@@ -227,8 +302,6 @@ def main():
                 logger.info(f"검색 쿼리: {search_query}")
                 logger.info(f"메타 질문: {is_meta_question}")
                 logger.info(f"검색된 문서 수: {len(retrieved_docs)}")
-                for i, doc in enumerate(retrieved_docs[:3]):
-                    logger.info(f"문서 {i+1}: {doc.page_content[:100]}...")
 
                 # 문서 포맷팅
                 context = "\n\n".join(doc.page_content for doc in retrieved_docs)
@@ -236,45 +309,9 @@ def main():
                 # LLM 연결
                 llm = RemoteRunnable(DEFAULT_LLM_URL)
 
-                # 프롬프트 구성 (메타 질문 여부에 따라 다르게)
-                if is_meta_question:
-                    # 메타 질문: 이전 대화에 집중
-                    full_prompt = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
-
-사용자가 이전 대화를 참조하는 질문을 했습니다. 반드시 아래 "최근 대화 기록"을 참고하여 답변하세요.
-
-참고용 검색 정보:
-{context}
----
-
-"""
-                else:
-                    # 일반 질문: 검색 정보 + 히스토리 균형있게
-                    full_prompt = f"""당신은 Future Systems 회사 소개 전문 AI 어시스턴트입니다.
-
-검색된 회사 정보가 질문과 관련이 있다면 그 정보를 우선적으로 사용하여 정확하게 답변하세요.
-검색된 정보가 질문과 관련이 없거나 충분하지 않다면 일반 지식을 사용하여 친절하게 답변하세요.
-특히 회사 직원의 전화번호, 이메일, 주소 등은 검색된 정보를 정확히 제공하세요.
-
-검색된 회사 정보:
-{context}
----
-
-"""
-
-                # 최근 히스토리만 추가 (최근 8개 메시지, 4턴)
-                if msgs.messages:
-                    recent_messages = msgs.messages[-8:]  # 최근 4턴 (8개 메시지)
-                    if recent_messages:
-                        full_prompt += "최근 대화 기록 (맥락 파악용):\n"
-                        for msg in recent_messages:
-                            role = "사용자" if msg.type == "human" else "AI"
-                            full_prompt += f"- {role}: {msg.content}\n"
-                        full_prompt += "\n"
-
-                # 현재 질문 (명확하게 구분)
-                full_prompt += f"현재 사용자 질문: {user_input}\n\n답변:"
-
+                # 프롬프트 구성
+                recent_messages = msgs.messages[-8:] if msgs.messages else []
+                full_prompt = build_prompt(context, is_meta_question, recent_messages, user_input)
                 logger.info(f"Full prompt length: {len(full_prompt)}")
 
                 # 응답 생성 (스트리밍)
@@ -282,51 +319,28 @@ def main():
                     chat_container = st.empty()
                     chunks = []
 
-                    # RemoteRunnable에 직접 텍스트 전달
+                    # 스트리밍 응답 수집
                     for chunk in llm.stream(full_prompt):
-                        logger.info(f"Chunk type: {type(chunk)}, content repr: {repr(chunk)}")
                         chunk_text = extract_text_from_chunk(chunk)
                         if chunk_text:
                             chunks.append(chunk_text)
                             chat_container.markdown("".join(chunks))
-                        else:
-                            logger.warning(f"Empty chunk_text from chunk: {repr(chunk)}")
 
-                    # 응답을 히스토리에 추가
+                    # 응답 정리 및 저장
                     final_response = "".join(chunks)
                     logger.info(f"Final response length: {len(final_response)}")
 
-                    # 프롬프트 패턴 제거 (후처리)
-                    final_response = final_response.strip()
+                    # 프롬프트 패턴 제거
+                    final_response = clean_response_text(final_response)
 
-                    # 1. 프롬프트 형식 패턴 제거
-                    patterns_to_clean = [
-                        (r'^[QA]:\s*', ''),  # Q: A: 제거
-                        (r'\n[QA]:\s*', '\n'),  # 중간의 Q: A: 제거
-                        (r'^(사용자|어시스턴트|AI):\s*', ''),  # 역할 레이블 제거
-                        (r'\n(사용자|어시스턴트|AI):\s*', '\n'),
-                        (r'^답변\s*[:：]\s*', ''),  # "답변:" 제거
-                        (r'현재.*?질문\s*[:：].*?\n', ''),  # "현재 질문: ..." 제거
-                    ]
-
-                    for pattern, replacement in patterns_to_clean:
-                        final_response = re.sub(pattern, replacement, final_response, flags=re.MULTILINE)
-
-                    final_response = final_response.strip()
-
-                    # 2. 중복 공백 정리
-                    final_response = re.sub(r'\n\s*\n', '\n\n', final_response)  # 여러 빈 줄 → 2개로
-                    final_response = re.sub(r'\n{3,}', '\n\n', final_response)  # 3개 이상 빈 줄 → 2개로
-
-                    # 정리된 응답 표시
+                    # 정리된 응답 표시 및 히스토리 저장
                     if final_response:
                         chat_container.markdown(final_response)
                         msgs.add_user_message(user_input)
                         msgs.add_ai_message(final_response)
                     else:
                         logger.error("No response generated from LLM")
-                        error_msg = "LLM에서 응답을 생성하지 못했습니다."
-                        chat_container.error(error_msg)
+                        chat_container.error("LLM에서 응답을 생성하지 못했습니다.")
 
             except Exception as e:
                 error_msg = f"오류가 발생했습니다: {str(e)}"
