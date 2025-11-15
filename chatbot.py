@@ -11,9 +11,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 from langchain_community.vectorstores import FAISS
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.chat_message_histories import StreamlitChatMessageHistory
 from langserve import RemoteRunnable
 
@@ -169,18 +167,6 @@ def main():
     for msg in msgs.messages:
         st.chat_message(msg.type).write(msg.content)
 
-    # RAG 프롬프트 템플릿 (MessagesPlaceholder 사용)
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """다음 제공된 정보만을 사용하여 질문에 답변하세요.
-제공된 정보에 없는 내용은 절대 답변하지 마세요.
-전화번호, 주소, 이메일 등은 제공된 정보에서 정확히 찾아서 그대로 제공하세요.
-
-제공된 정보:
-{context}"""),
-        MessagesPlaceholder(variable_name="history"),
-        ("human", "{question}"),
-    ])
-
     # 사용자 입력
     if user_input := st.chat_input("질문을 입력하세요"):
         # 사용자 메시지 표시
@@ -195,44 +181,50 @@ def main():
                 for i, doc in enumerate(retrieved_docs[:3]):
                     logger.info(f"문서 {i+1}: {doc.page_content[:100]}...")
 
+                # 문서 포맷팅
+                context = "\n\n".join(doc.page_content for doc in retrieved_docs)
+
                 # LLM 연결
                 llm = RemoteRunnable(DEFAULT_LLM_URL)
 
-                # 문서 포맷팅
-                def format_docs(docs):
-                    return "\n\n".join(doc.page_content for doc in docs)
+                # 프롬프트에 컨텍스트와 히스토리 주입
+                messages = [
+                    ("system", f"""다음 제공된 정보만을 사용하여 질문에 답변하세요.
+제공된 정보에 없는 내용은 절대 답변하지 마세요.
+전화번호, 주소, 이메일 등은 제공된 정보에서 정확히 찾아서 그대로 제공하세요.
 
-                # RAG 체인 (히스토리 없이)
-                rag_chain = (
-                    {
-                        "context": retriever | format_docs,
-                        "question": RunnablePassthrough(),
-                    }
-                    | prompt
-                    | llm
-                )
+제공된 정보:
+{context}""")
+                ]
 
-                # RunnableWithMessageHistory로 래핑 (공식 LangChain 방식)
-                chain_with_history = RunnableWithMessageHistory(
-                    rag_chain,
-                    lambda session_id: msgs,
-                    input_messages_key="question",
-                    history_messages_key="history",
-                )
+                # 히스토리 추가
+                messages.extend([(msg.type, msg.content) for msg in msgs.messages])
 
-                # 설정 (세션 ID)
-                config = {"configurable": {"session_id": "user_session"}}
+                # 현재 질문 추가
+                messages.append(("human", user_input))
+
+                # 프롬프트 생성
+                chat_prompt = ChatPromptTemplate.from_messages(messages)
+
+                # 체인 실행
+                chain = chat_prompt | llm
 
                 # 응답 생성 (스트리밍)
                 with st.chat_message("ai"):
                     chat_container = st.empty()
                     chunks = []
 
-                    for chunk in chain_with_history.stream({"question": user_input}, config):
+                    for chunk in chain.stream({}):
                         chunk_text = extract_text_from_chunk(chunk)
                         if chunk_text:
                             chunks.append(chunk_text)
                             chat_container.markdown("".join(chunks))
+
+                    # 응답을 히스토리에 추가
+                    final_response = "".join(chunks)
+                    if final_response:
+                        msgs.add_user_message(user_input)
+                        msgs.add_ai_message(final_response)
 
             except Exception as e:
                 error_msg = f"오류가 발생했습니다: {str(e)}"
